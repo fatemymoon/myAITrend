@@ -1,6 +1,8 @@
 """JSONL 적재. 저장 위치: data/daily/YYYY-MM-DD.jsonl (KST 날짜별, append 전용).
 
-- 항목 한 줄 = 수집 항목 하나 (id, title, url, source, category, keywords_matched, score, collected_at)
+- 항목 한 줄 = 수집 항목 하나 (id, title, url, source, category, keywords_matched, score, published_at, collected_at)
+  published_at 은 원문 게시 시각(UTC, 없으면 null), collected_at 은 수집 시각
+- 정렬·기간 필터는 게시 시각 기준이고, 게시 시각이 없으면 수집 시각으로 대신한다
 - 실행 기록은 data/daily/runs.jsonl 에 한 줄씩 append
 - 폴더와 오늘 파일은 수집 건수가 0이어도 항상 만든다 (touch_today)
 - 중복 판정은 전체 일별 파일의 id 집합으로 한다
@@ -107,6 +109,7 @@ def insert_items(rows: list[dict]) -> int:
                     "category": r["category"],
                     "keywords_matched": r["keywords_matched"],
                     "score": r["score"],
+                    "published_at": r.get("published_at"),
                     "collected_at": stamp,
                 },
                 ensure_ascii=False,
@@ -145,18 +148,23 @@ def last_run() -> dict | None:
     return rs[-1] if rs else None
 
 
+def item_time(r: dict) -> str:
+    """정렬·기간 비교용 시각: 게시 시각, 없으면 수집 시각 (둘 다 UTC ISO 문자열)."""
+    return r.get("published_at") or r["collected_at"]
+
+
 def latest(category: str | None, limit: int = 50) -> list[dict]:
     items = all_items()
     if category:
         items = [r for r in items if r["category"] == category]
-    items.sort(key=lambda r: (r["collected_at"], r["score"]), reverse=True)
+    items.sort(key=lambda r: (item_time(r), r["score"]), reverse=True)
     return items[:limit]
 
 
 def recent_items(days: int) -> list[dict]:
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
-    items = [r for r in all_items() if r["collected_at"] >= since]
-    items.sort(key=lambda r: (r["score"], r["collected_at"]), reverse=True)
+    items = [r for r in all_items() if item_time(r) >= since]
+    items.sort(key=lambda r: (r["score"], item_time(r)), reverse=True)
     return items
 
 

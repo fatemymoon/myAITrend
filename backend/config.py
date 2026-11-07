@@ -32,5 +32,8 @@ def load_profile(path: Path = PROFILE_PATH) -> dict[str, Any]:
     data["scoring"].setdefault("min_score", 1)
     data["scoring"].setdefault("buzz_min_points", 100)
     data["scoring"].setdefault("buzz_max_bonus", 2)
+    data.setdefault("collect", {})
+    data["collect"]["max_age_days"] = int(data["collect"].get("max_age_days", 14))
+    data["collect"]["korean_only"] = bool(data["collect"].get("korean_only", False))
     data["language"] = str((data.get("profile") or {}).get("language", "ko"))
     return data

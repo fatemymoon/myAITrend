@@ -13,30 +13,40 @@ categories:               # /latest?category= 에 쓰는 값
   - 유행
 
 keywords:
-  priority:               # 가중치 3 — 가장 중요한 키워드
+  priority:               # 가중치 3 — 가장 중요한 키워드 (영문과 한글 표기를 함께 둔다)
     - Claude
+    - 클로드
     - agent
+    - 에이전트
     - MCP
     - 업무자동화
+    - 자동화              # "업무자동화"가 들어간 글은 둘 다 걸려 6점이 된다
     - AI 교육
   general:                # 가중치 1 — 배경 관련 키워드
     - AI
+    - 인공지능
     - LLM
+    - 언어 모델
     - 생성형
-    - 에이전트
-    - 자동화
+    - 프롬프트
     - 교육
     - 코딩
     - Anthropic
+    - 앤트로픽
     - OpenAI
+    - 오픈AI
     - 모델
   exclude:                # 제목/요약에 하나라도 있으면 수집 제외
     - 광고
     - 코인
 
+collect:
+  max_age_days: 14        # 게시된 지 이 일수가 지난 글은 수집하지 않음 (게시일이 없는 글은 수집)
+  korean_only: true       # 제목·요약에 한글이 없는 글은 수집하지 않음
+
 scoring:
   min_score: 2            # 이 점수 미만 항목은 저장하지 않음 (일반 키워드 1개만 걸린 기사 제외)
-  buzz_min_points: 100    # HN 포인트 / HF Daily Papers upvotes 가 이 값 이상이면 인기 가산
+  buzz_min_points: 100    # 추천수(points)가 이 값 이상이면 인기 가산 — 현재 소스 중 추천수를 주는 곳은 없음
   buzz_max_bonus: 2       # 인기 가산점 상한
 
 # 카테고리 규칙 (위에서부터 우선 적용)
@@ -74,7 +84,5 @@ category_rules:
     - 아키텍처
     - 연구
     - 알고리즘
-  유행_sources:          # 인기 가산점 대상 소스 (유행 카테고리 판정용)
-    - hacker_news
+  유행_sources:          # 인기 가산점 대상 소스 (유행 카테고리 판정용). 추천수를 주는 소스를 추가할 때 함께 등록
     - geeknews
-    - hf_daily_papers

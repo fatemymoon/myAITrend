@@ -1,5 +1,6 @@
 """FastAPI 서버. 실행: `uvicorn backend.main:app --reload`
 
+- /        : 홈페이지 (frontend/index.html, /latest·/stats 를 불러와 보여줌)
 - /health : 상태 확인
 - /latest?category=&limit= : 최신 수집 항목
 - /stats  : 카테고리/소스별 건수, 마지막 실행 결과
@@ -13,10 +14,11 @@ from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
 
 from backend import storage
 from backend.collector import run_once, setup_logging
-from backend.config import load_profile
+from backend.config import ROOT_DIR, load_profile
 
 SCHEDULE_MINUTES = 10
 scheduler = BackgroundScheduler(
@@ -49,6 +51,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="myAITrend", version="0.1.0", lifespan=lifespan)
+
+
+INDEX_HTML = ROOT_DIR / "frontend" / "index.html"
+
+
+@app.get("/", include_in_schema=False)
+def home() -> FileResponse:
+    return FileResponse(INDEX_HTML, media_type="text/html; charset=utf-8")
 
 
 @app.get("/health")

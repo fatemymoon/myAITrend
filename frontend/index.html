@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>myAITrend · AI 트렌드</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #e4e3df;
+    --accent: #2f5bd3; --accent-soft: #e8eefc; --chip: #f0efeb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151514; --panel: #1e1e1c; --text: #ecebe7; --muted: #9a9993; --line: #2f2f2c;
+      --accent: #7d9cf0; --accent-soft: #24304f; --chip: #2a2a27;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 32px 20px 64px; }
+  header h1 { margin: 0; font-size: 26px; letter-spacing: -0.02em; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+  .meta { display: flex; gap: 20px; flex-wrap: wrap; margin: 20px 0 24px; }
+  .meta div { font-size: 13px; color: var(--muted); }
+  .meta b { display: block; font-size: 20px; color: var(--text); font-variant-numeric: tabular-nums; }
+  .controls { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; position: sticky; top: 0;
+              background: var(--bg); padding: 8px 0; z-index: 1; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tabs button {
+    border: 1px solid var(--line); background: var(--panel); color: var(--text);
+    padding: 6px 12px; border-radius: 999px; font-size: 14px; cursor: pointer;
+  }
+  .tabs button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .tabs .n { opacity: .7; margin-left: 4px; font-variant-numeric: tabular-nums; }
+  .row { display: flex; gap: 8px; }
+  input[type=search], select {
+    border: 1px solid var(--line); background: var(--panel); color: var(--text);
+    padding: 8px 12px; border-radius: 8px; font-size: 14px;
+  }
+  input[type=search] { flex: 1; min-width: 0; }
+  ul { list-style: none; padding: 0; margin: 0; }
+  li.item {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px; margin-bottom: 10px;
+  }
+  li.item a.title { color: var(--text); text-decoration: none; font-weight: 600; font-size: 16px; }
+  li.item a.title:hover { color: var(--accent); text-decoration: underline; }
+  .info { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 6px; font-size: 13px; color: var(--muted); }
+  .cat { background: var(--accent-soft); color: var(--accent); padding: 1px 8px; border-radius: 999px; font-weight: 600; }
+  .kw { background: var(--chip); padding: 1px 7px; border-radius: 6px; }
+  .score { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .empty, .error { text-align: center; color: var(--muted); padding: 40px 0; }
+  .error { color: #c0392b; }
+  footer { margin-top: 32px; font-size: 12px; color: var(--muted); text-align: center; }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>AI 트렌드</h1>
+    <p>관심 키워드로 모은 최근 14일 AI 소식</p>
+  </header>
+
+  <section class="meta" aria-label="수집 현황">
+    <div><b id="m-total">–</b>전체 글</div>
+    <div><b id="m-sources">–</b>소스</div>
+    <div><b id="m-last">–</b>마지막 수집</div>
+  </section>
+
+  <div class="controls">
+    <div class="tabs" id="tabs" role="group" aria-label="카테고리"></div>
+    <div class="row">
+      <input type="search" id="q" placeholder="제목·키워드 검색" aria-label="검색">
+      <select id="sort" aria-label="정렬">
+        <option value="time">최신순</option>
+        <option value="score">점수순</option>
+      </select>
+    </div>
+  </div>
+
+  <ul id="list"><li class="empty">불러오는 중…</li></ul>
+
+  <footer>myAITrend · <a href="/docs">API 문서</a></footer>
+</div>
+
+<script>
+const SOURCE_NAMES = {
+  geeknews: "GeekNews", aws_kr: "AWS 한국", google_kr: "Google 개발자", naver_d2: "네이버 D2",
+  kakao: "카카오", lycorp_ko: "LY Corp", banksalad: "뱅크샐러드", toss: "토스",
+  daangn: "당근", musinsa: "무신사",
+};
+const CATEGORY_ORDER = ["최신기술동향", "도구", "기술", "교육소식", "유행"];
+
+let items = [];
+let category = "전체";
+
+const $ = (id) => document.getElementById(id);
+
+function el(tag, attrs = {}, text) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function safeUrl(u) {
+  try { const p = new URL(u); return (p.protocol === "http:" || p.protocol === "https:") ? p.href : null; }
+  catch { return null; }
+}
+
+function itemTime(r) { return r.published_at || r.collected_at; }
+
+function ago(iso) {
+  if (!iso) return "";
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 60) return "방금";
+  if (s < 3600) return `${Math.floor(s / 60)}분 전`;
+  if (s < 86400) return `${Math.floor(s / 3600)}시간 전`;
+  if (s < 86400 * 7) return `${Math.floor(s / 86400)}일 전`;
+  return new Date(iso).toLocaleDateString("ko-KR");
+}
+
+function renderTabs() {
+  const counts = {};
+  for (const r of items) counts[r.category] = (counts[r.category] || 0) + 1;
+  const cats = ["전체", ...CATEGORY_ORDER.filter((c) => counts[c]),
+                ...Object.keys(counts).filter((c) => !CATEGORY_ORDER.includes(c))];
+  const tabs = $("tabs");
+  tabs.replaceChildren();
+  for (const c of cats) {
+    const b = el("button", { type: "button", "aria-pressed": String(c === category) }, c);
+    b.append(el("span", { class: "n" }, String(c === "전체" ? items.length : counts[c])));
+    b.onclick = () => { category = c; renderTabs(); renderList(); };
+    tabs.append(b);
+  }
+}
+
+function renderList() {
+  const q = $("q").value.trim().toLowerCase();
+  let rows = items.filter((r) => category === "전체" || r.category === category);
+  if (q) rows = rows.filter((r) =>
+    r.title.toLowerCase().includes(q) || (r.keywords_matched || []).some((k) => k.toLowerCase().includes(q)));
+  if ($("sort").value === "score") rows.sort((a, b) => b.score - a.score || itemTime(b).localeCompare(itemTime(a)));
+  else rows.sort((a, b) => itemTime(b).localeCompare(itemTime(a)) || b.score - a.score);
+
+  const list = $("list");
+  list.replaceChildren();
+  if (!rows.length) { list.append(el("li", { class: "empty" }, "조건에 맞는 글이 없습니다")); return; }
+
+  for (const r of rows) {
+    const li = el("li", { class: "item" });
+    const href = safeUrl(r.url);
+    const a = el("a", { class: "title", target: "_blank", rel: "noopener noreferrer" }, r.title);
+    if (href) a.href = href;
+    li.append(a);
+
+    const info = el("div", { class: "info" });
+    info.append(el("span", { class: "cat" }, r.category));
+    info.append(el("span", {}, SOURCE_NAMES[r.source] || r.source));
+    const t = itemTime(r);
+    const time = el("time", { datetime: t, title: new Date(t).toLocaleString("ko-KR") }, ago(t));
+    info.append(time);
+    for (const k of (r.keywords_matched || []).slice(0, 4)) info.append(el("span", { class: "kw" }, k));
+    info.append(el("span", { class: "score", title: "관련도 점수" }, `점수 ${r.score}`));
+    li.append(info);
+    list.append(li);
+  }
+}
+
+async function load() {
+  try {
+    const [latest, stats] = await Promise.all([
+      fetch("/latest?limit=500").then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); }),
+      fetch("/stats").then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); }),
+    ]);
+    items = latest.items;
+    $("m-total").textContent = stats.total;
+    $("m-sources").textContent = Object.keys(stats.by_source).length;
+    $("m-last").textContent = stats.last_run ? ago(stats.last_run.finished_at) : "–";
+    renderTabs();
+    renderList();
+  } catch (e) {
+    $("list").replaceChildren(el("li", { class: "error" }, `데이터를 불러오지 못했습니다 (${e.message})`));
+  }
+}
+
+$("q").addEventListener("input", renderList);
+$("sort").addEventListener("change", renderList);
+load();
+setInterval(load, 5 * 60 * 1000);  // 5분마다 새로고침
+</script>
+</body>
+</html>
