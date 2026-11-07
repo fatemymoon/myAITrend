@@ -8,7 +8,7 @@ tools: Bash, Read, Edit, Write, Grep, Glob
 
 ## 입력 증거 (먼저 수집)
 1. `logs/collector.log` 에서 최근 `WARNING`/`ERROR`/`Traceback` 줄 (`grep -E "WARNING|ERROR|Traceback" logs/collector.log | tail -100`).
-2. `data/trends.db` 의 `runs` 테이블 최근 실행의 `failed_sources` (JSON) — `python3 -c` 로 조회.
+2. `data/daily/runs.jsonl` 마지막 몇 줄의 `failed_sources` (JSON 배열) — `tail -n 3 data/daily/runs.jsonl` 로 확인.
 3. 필요하면 `python3 -m backend.collector` 를 한 번 실행해 현재 상태를 재현한다. 이 실행은 실제 네트워크를 쓰므로 요청을 늘리지 말고 한 번만 한다.
 
 ## 분류와 원칙
@@ -16,7 +16,7 @@ tools: Bash, Read, Edit, Write, Grep, Glob
 - **429 / 요청 과다**: `Retry-After` 를 존중하고 `backend/net.py`의 호스트별 간격을 늘리거나 백오프를 넣는다. 재시도 횟수는 소수로 제한한다.
 - **타임아웃 / 연결 오류**: 일시 오류인지 반복되는지 구분한다. 반복되면 소스 자체 문제로 보고하고 코드 수정은 최소화한다.
 - **파싱 오류**: 실제 응답을 한 번 받아 형식을 확인한 뒤 `parse_feed` 또는 해당 소스 함수를 고친다. 샘플 응답을 추측으로 고치지 않는다.
-- **DB 적재 실패**: `backend/storage.py` 의 스키마와 쿼리를 확인한다. 스키마 변경이 필요하면 기존 `data/trends.db` 를 삭제하지 말고 보고한다.
+- **적재 실패(JSONL 쓰기)**: `backend/storage.py` 의 `insert_items` / `record_run` 과 `data/daily/` 권한·경로를 확인한다. 기존 `data/daily/*.jsonl` 은 삭제하지 말고 보고한다.
 - **robots.txt 금지 / 이용약관**: 확인 로직(`backend/net.py`)을 끄거나 우회하지 않는다. 이것은 고칠 대상이 아니다.
 
 ## 절차 (순서 고정)

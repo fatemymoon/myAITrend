@@ -1,7 +1,8 @@
 """수집 1회 실행. 단독 실행: `python -m backend.collector`
 
 - 소스는 순서대로 실행, 한 소스가 실패해도 나머지는 계속한다.
-- URL 해시로 실행 내 중복을 먼저 제거하고, DB에는 INSERT OR IGNORE로 실행 간 중복도 막는다.
+- URL 해시로 실행 내 중복을 먼저 제거하고, 저장 시에는 기존 일별 파일의 id와 대조해 실행 간 중복도 막는다.
+- 결과는 data/daily/YYYY-MM-DD.jsonl 에 append 한다. 수집 건수가 0이어도 폴더와 오늘 파일을 만든다.
 - 이 모듈은 FastAPI 스케줄러에서도 run_once()로 호출된다 (동시 실행은 락으로 막음).
 """
 
@@ -52,7 +53,7 @@ def run_once() -> dict:
 def _run() -> dict:
     profile = load_profile()
     scorer = Scorer(profile)
-    storage.init_db()
+    storage.init_db()  # data/daily 폴더와 오늘 파일을 먼저 만든다 (0건이어도 남도록)
 
     started = storage.now_iso()
     client = PoliteClient()
@@ -60,7 +61,7 @@ def _run() -> dict:
 
     fetched = 0
     failed: list[dict] = []
-    per_source: dict[str, int] = {}
+    per_source: dict[str, dict] = {}
     seen: set[str] = set()
     rows: list[dict] = []
 
@@ -69,8 +70,10 @@ def _run() -> dict:
             try:
                 raws = fn(ctx)
             except Exception as exc:  # 소스 하나의 실패가 전체를 멈추지 않게 한다
-                log.warning("소스 실패 %s: %s: %s", name, type(exc).__name__, exc)
-                failed.append({"source": name, "error": f"{type(exc).__name__}: {exc}"[:300]})
+                err = f"{type(exc).__name__}: {exc}"[:300]
+                log.warning("소스 실패 %s: %s", name, err)
+                failed.append({"source": name, "error": err})
+                per_source[name] = {"status": "실패", "raw": 0, "matched": 0, "error": err}
                 continue
 
             fetched += len(raws)
@@ -85,7 +88,7 @@ def _run() -> dict:
                     continue
                 rows.append({"title": raw.title, "url": raw.url, "source": raw.source, **scored})
                 kept += 1
-            per_source[name] = kept
+            per_source[name] = {"status": "성공", "raw": len(raws), "matched": kept, "error": None}
             log.info("소스 %s: 원본 %d건, 관련 %d건", name, len(raws), kept)
     finally:
         client.close()
@@ -94,10 +97,13 @@ def _run() -> dict:
     storage.record_run(started, fetched, inserted, failed)
     summary = {
         "started_at": started,
+        "daily_file": str(storage.daily_path()),
         "fetched": fetched,
         "matched": len(rows),
         "inserted": inserted,
-        "per_source_matched": per_source,
+        "sources_ok": sum(1 for v in per_source.values() if v["status"] == "성공"),
+        "sources_failed": sum(1 for v in per_source.values() if v["status"] == "실패"),
+        "per_source": per_source,
         "failed_sources": failed,
     }
     log.info("수집 완료: 원본 %d, 관련 %d, 신규 저장 %d, 실패 소스 %d",
@@ -105,14 +111,30 @@ def _run() -> dict:
     return summary
 
 
+def format_table(summary: dict) -> str:
+    """소스별 성공/실패 건수를 사람이 읽는 표로 만든다."""
+    lines = [f"{'소스':<18}{'상태':<6}{'원본':>7}{'관련':>7}  비고"]
+    for name, v in summary["per_source"].items():
+        note = v["error"] or ""
+        lines.append(f"{name:<18}{v['status']:<6}{v['raw']:>7}{v['matched']:>7}  {note}")
+    lines.append(
+        f"합계: 성공 {summary['sources_ok']} / 실패 {summary['sources_failed']} · "
+        f"원본 {summary['fetched']}건 · 관련 {summary['matched']}건 · 신규 저장 {summary['inserted']}건"
+    )
+    lines.append(f"저장 파일: {summary['daily_file']}")
+    return "\n".join(lines)
+
+
 def main() -> int:
     setup_logging()
     summary = run_once()
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
     if summary.get("skipped"):
+        print("건너뜀: 다른 수집이 진행 중입니다")
         return 0
+    print(format_table(summary))
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
     # 모든 소스가 실패했을 때만 비정상 종료
-    return 1 if len(summary["failed_sources"]) == len(SOURCES) else 0
+    return 1 if summary["sources_failed"] == len(SOURCES) else 0
 
 
 if __name__ == "__main__":

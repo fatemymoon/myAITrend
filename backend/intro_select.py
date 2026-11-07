@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import json
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
 
 from backend import storage
 
@@ -43,19 +42,9 @@ def select_candidates(rows: list[dict], topic: str | None = None, per_category: 
     }
 
 
-def recent_rows(days: int, path=None) -> list[dict]:
-    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
-    with storage.connect(path) as conn:
-        rows = conn.execute(
-            "SELECT * FROM items WHERE collected_at >= ? ORDER BY score DESC, collected_at DESC",
-            (since,),
-        ).fetchall()
-    out = []
-    for r in rows:
-        d = dict(r)
-        d["keywords_matched"] = json.loads(d["keywords_matched"])
-        out.append(d)
-    return out
+def recent_rows(days: int) -> list[dict]:
+    """최근 N일 수집 항목 (score DESC, collected_at DESC)."""
+    return storage.recent_items(days)
 
 
 def main() -> int:
