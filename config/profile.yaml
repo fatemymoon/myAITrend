@@ -1,0 +1,80 @@
+# 관심사 프로필 — 수집기가 이 파일을 읽어 카테고리/관련도 점수를 계산합니다.
+# 키워드 매칭은 대소문자 무시, 영문 키워드는 앞 글자 경계만 확인합니다 (예: "agent" → "agents" 매칭).
+
+profile:
+  role: 재직자 교육 담당, 업무자동화, 클로드 코드 활용
+  language: ko            # 한글 제목이면 점수 +0.5 (GeekNews 등 국내 소스 우대)
+
+categories:               # /latest?category= 에 쓰는 값
+  - 최신기술동향
+  - 교육소식
+  - 도구
+  - 기술
+  - 유행
+
+keywords:
+  priority:               # 가중치 3 — 가장 중요한 키워드
+    - Claude
+    - agent
+    - MCP
+    - 업무자동화
+    - AI 교육
+  general:                # 가중치 1 — 배경 관련 키워드
+    - AI
+    - LLM
+    - 생성형
+    - 에이전트
+    - 자동화
+    - 교육
+    - 코딩
+    - Anthropic
+    - OpenAI
+    - 모델
+  exclude:                # 제목/요약에 하나라도 있으면 수집 제외
+    - 광고
+    - 코인
+
+scoring:
+  min_score: 2            # 이 점수 미만 항목은 저장하지 않음 (일반 키워드 1개만 걸린 기사 제외)
+  buzz_min_points: 100    # HN 포인트 / HF Daily Papers upvotes 가 이 값 이상이면 인기 가산
+  buzz_max_bonus: 2       # 인기 가산점 상한
+
+# 카테고리 규칙 (위에서부터 우선 적용)
+# 1) 교육소식 2) 도구 3) 기술 4) 유행(인기 항목, 위 규칙에 안 걸린 경우) 5) 최신기술동향(기본값)
+category_rules:
+  교육소식:
+    - 교육
+    - 강의
+    - 워크숍
+    - 커리큘럼
+    - 자격증
+    - 학습
+    - education
+    - workshop
+    - certification
+  도구:
+    - tool
+    - cli
+    - sdk
+    - plugin
+    - extension
+    - 출시
+    - 공개
+    - 도구
+    - library
+  기술:
+    - paper
+    - arxiv
+    - benchmark
+    - architecture
+    - research
+    - protocol
+    - 논문
+    - 벤치마크
+    - 아키텍처
+    - 연구
+    - 알고리즘
+  유행_sources:          # 인기 가산점 대상 소스 (유행 카테고리 판정용)
+    - hacker_news
+    - geeknews
+    - hf_daily_papers
