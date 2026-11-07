@@ -18,17 +18,16 @@ end = start + timedelta(days=1)
 print(today.isoformat(), start.isoformat(timespec="seconds"), end.isoformat(timespec="seconds"))
 PY
 ```
-출력된 날짜를 파일명으로, 시작/끝 시각을 SQL 범위로 쓴다 (`collected_at >= ? AND collected_at < ?`).
+출력된 날짜를 파일명으로, 시작/끝 시각으로 범위를 잡는다. 오늘 항목은 `data/daily/<날짜>.jsonl` 파일 한 개이므로 파일 내용 전체가 오늘 범위다 (`collected_at` 이 같은 날짜인지 한 번 더 확인).
 
 ## 수집 데이터 출처
-- `data/trends.db`
-  - `items`: 오늘 범위 건수, 카테고리별 건수, 소스별 건수, 상위 항목
-  - `runs`: 오늘 범위의 실행 횟수, 실행별 `fetched`/`inserted`/`failed_sources`
+- `data/daily/<오늘 KST 날짜>.jsonl`: 항목 한 줄씩. 오늘 범위 건수, 카테고리별 건수, 소스별 건수, 상위 항목
+- `data/daily/runs.jsonl`: 실행 한 줄씩. 오늘 `started_at` 인 줄의 실행 횟수, 실행별 `fetched`/`inserted`/`failed_sources`
 - `logs/collector.log`: 오늘 `WARNING`/`ERROR`/`Traceback` 줄 (오류 항목용). 로그에 있는 줄만 인용한다.
 - 로그나 DB에 없는 내용은 쓰지 않는다. 원인을 모르면 "추정:"으로 쓰거나 "원인 미확인"이라고 쓴다.
 
 ## 상위 트렌드 10건
-- 범위 내 items 를 `score DESC, collected_at DESC` 로 정렬해 상위 10건을 고른다.
+- 오늘 파일의 항목을 `score` 내림차순, 같은 점수면 `collected_at` 내림차순으로 정렬해 상위 10건을 고른다 (Python `json` 으로 읽는다).
 - 카테고리별 소제목 아래에 나열한다. 같은 카테고리 항목이 없으면 그 소제목은 "해당 없음"으로 둔다.
 - 각 항목: 제목, 소스, 점수, URL (DB 값 그대로).
 - 항목이 10건 미만이면 있는 만큼만 쓰고 "총 N건"이라고 적는다.

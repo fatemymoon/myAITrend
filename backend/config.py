@@ -9,7 +9,8 @@ import yaml
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 PROFILE_PATH = ROOT_DIR / "config" / "profile.yaml"
-DB_PATH = ROOT_DIR / "data" / "trends.db"
+DAILY_DIR = ROOT_DIR / "data" / "daily"  # 날짜별 수집 결과: YYYY-MM-DD.jsonl (KST 날짜)
+RUNS_FILE = DAILY_DIR / "runs.jsonl"     # 실행 기록 (한 줄 = 한 번 실행)
 LOG_DIR = ROOT_DIR / "logs"
 
 # 모든 HTTP 요청에 쓰는 User-Agent. 개인 식별 정보는 넣지 않는다.

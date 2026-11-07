@@ -1,42 +1,23 @@
-"""SQLite 적재. 기본 경로는 data/trends.db."""
+"""JSONL 적재. 저장 위치: data/daily/YYYY-MM-DD.jsonl (KST 날짜별, append 전용).
+
+- 항목 한 줄 = 수집 항목 하나 (id, title, url, source, category, keywords_matched, score, collected_at)
+- 실행 기록은 data/daily/runs.jsonl 에 한 줄씩 append
+- 폴더와 오늘 파일은 수집 건수가 0이어도 항상 만든다 (touch_today)
+- 중복 판정은 전체 일별 파일의 id 집합으로 한다
+"""
 
 from __future__ import annotations
 
 import hashlib
 import json
-import sqlite3
-from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterator
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from zoneinfo import ZoneInfo
 
-from backend.config import DB_PATH
+from backend.config import DAILY_DIR, RUNS_FILE
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS items (
-    id               TEXT PRIMARY KEY,          -- sha256(정규화된 URL)
-    title            TEXT NOT NULL,
-    url              TEXT NOT NULL,
-    source           TEXT NOT NULL,
-    category         TEXT NOT NULL,
-    keywords_matched TEXT NOT NULL,             -- JSON 배열
-    score            REAL NOT NULL,
-    collected_at     TEXT NOT NULL               -- ISO 8601 UTC
-);
-CREATE INDEX IF NOT EXISTS idx_items_category ON items(category, collected_at);
-CREATE INDEX IF NOT EXISTS idx_items_collected ON items(collected_at);
-
-CREATE TABLE IF NOT EXISTS runs (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    started_at     TEXT NOT NULL,
-    finished_at    TEXT NOT NULL,
-    fetched        INTEGER NOT NULL,
-    inserted       INTEGER NOT NULL,
-    failed_sources TEXT NOT NULL                -- JSON 배열 {source, error}
-);
-"""
-
+KST = ZoneInfo("Asia/Seoul")
 _TRACKING_PARAMS = {"fbclid", "gclid", "ref", "ref_src", "source"}
 
 
@@ -49,9 +30,7 @@ def canonical_url(url: str) -> str:
         if not k.lower().startswith("utm_") and k.lower() not in _TRACKING_PARAMS
     ]
     path = parts.path.rstrip("/") or "/"
-    return urlunsplit(
-        (parts.scheme.lower(), parts.netloc.lower(), path, urlencode(query), "")
-    )
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, urlencode(query), ""))
 
 
 def url_id(url: str) -> str:
@@ -62,125 +41,136 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-@contextmanager
-def connect(path: Path | None = None) -> Iterator[sqlite3.Connection]:
-    path = path or DB_PATH  # 호출 시점에 해석해야 테스트에서 경로를 바꿀 수 있다
+def today_kst() -> date:
+    return datetime.now(KST).date()
+
+
+def daily_path(day: date | None = None) -> Path:
+    return DAILY_DIR / f"{(day or today_kst()).isoformat()}.jsonl"
+
+
+def init_db() -> None:
+    """이름은 호환을 위해 init_db 로 두었다. 폴더와 오늘 파일을 만든다."""
+    DAILY_DIR.mkdir(parents=True, exist_ok=True)
+    touch_today()
+
+
+def touch_today() -> Path:
+    path = daily_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, timeout=10)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
+    path.touch(exist_ok=True)
+    return path
 
 
-def init_db(path: Path | None = None) -> None:
-    with connect(path) as conn:
-        conn.executescript(SCHEMA)
+def _item_files() -> list[Path]:
+    if not DAILY_DIR.exists():
+        return []
+    return sorted(p for p in DAILY_DIR.glob("*.jsonl") if p.name != RUNS_FILE.name)
 
 
-def insert_items(rows: list[dict], path: Path | None = None) -> int:
-    """URL 해시가 이미 있으면 무시(첫 수집 시각 유지). 새로 들어간 건수를 반환."""
-    if not rows:
-        return 0
+def _read_jsonl(path: Path) -> list[dict]:
+    out = []
+    with path.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                out.append(json.loads(line))
+    return out
+
+
+def all_items() -> list[dict]:
+    items: list[dict] = []
+    for f in _item_files():
+        items.extend(_read_jsonl(f))
+    return items
+
+
+def insert_items(rows: list[dict]) -> int:
+    """id가 이미 있으면 건너뛴다(첫 수집 시각 유지). 새로 쓴 건수를 반환. 0건이어도 오늘 파일은 만든다."""
+    DAILY_DIR.mkdir(parents=True, exist_ok=True)
+    path = touch_today()
+    seen = {r["id"] for r in all_items()}
     stamp = now_iso()
-    values = [
-        (
-            url_id(r["url"]),
-            r["title"],
-            r["url"],
-            r["source"],
-            r["category"],
-            json.dumps(r["keywords_matched"], ensure_ascii=False),
-            r["score"],
-            stamp,
+    new_lines = []
+    for r in rows:
+        uid = url_id(r["url"])
+        if uid in seen:
+            continue
+        seen.add(uid)
+        new_lines.append(
+            json.dumps(
+                {
+                    "id": uid,
+                    "title": r["title"],
+                    "url": r["url"],
+                    "source": r["source"],
+                    "category": r["category"],
+                    "keywords_matched": r["keywords_matched"],
+                    "score": r["score"],
+                    "collected_at": stamp,
+                },
+                ensure_ascii=False,
+            )
         )
-        for r in rows
-    ]
-    with connect(path) as conn:
-        before = conn.total_changes
-        conn.executemany(
-            "INSERT OR IGNORE INTO items "
-            "(id, title, url, source, category, keywords_matched, score, collected_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            values,
-        )
-        return conn.total_changes - before
+    if new_lines:
+        with path.open("a", encoding="utf-8") as f:
+            f.write("\n".join(new_lines) + "\n")
+    return len(new_lines)
 
 
-def record_run(
-    started_at: str,
-    fetched: int,
-    inserted: int,
-    failed: list[dict],
-    path: Path | None = None,
-) -> None:
-    with connect(path) as conn:
-        conn.execute(
-            "INSERT INTO runs (started_at, finished_at, fetched, inserted, failed_sources) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (started_at, now_iso(), fetched, inserted, json.dumps(failed, ensure_ascii=False)),
-        )
+def record_run(started_at: str, fetched: int, inserted: int, failed: list[dict]) -> None:
+    DAILY_DIR.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(
+        {
+            "started_at": started_at,
+            "finished_at": now_iso(),
+            "fetched": fetched,
+            "inserted": inserted,
+            "failed_sources": failed,
+        },
+        ensure_ascii=False,
+    )
+    with RUNS_FILE.open("a", encoding="utf-8") as f:
+        f.write(line + "\n")
 
 
-def latest(category: str | None, limit: int = 50, path: Path | None = None) -> list[dict]:
-    sql = "SELECT * FROM items"
-    args: list = []
+def runs() -> list[dict]:
+    if not RUNS_FILE.exists():
+        return []
+    return _read_jsonl(RUNS_FILE)
+
+
+def last_run() -> dict | None:
+    rs = runs()
+    return rs[-1] if rs else None
+
+
+def latest(category: str | None, limit: int = 50) -> list[dict]:
+    items = all_items()
     if category:
-        sql += " WHERE category = ?"
-        args.append(category)
-    sql += " ORDER BY collected_at DESC, score DESC LIMIT ?"
-    args.append(limit)
-    with connect(path) as conn:
-        return [_row(r) for r in conn.execute(sql, args)]
+        items = [r for r in items if r["category"] == category]
+    items.sort(key=lambda r: (r["collected_at"], r["score"]), reverse=True)
+    return items[:limit]
 
 
-def stats(path: Path | None = None) -> dict:
-    with connect(path) as conn:
-        total = conn.execute("SELECT COUNT(*) FROM items").fetchone()[0]
-        by_cat = {
-            r[0]: r[1]
-            for r in conn.execute("SELECT category, COUNT(*) FROM items GROUP BY category")
-        }
-        by_src = {
-            r[0]: r[1]
-            for r in conn.execute("SELECT source, COUNT(*) FROM items GROUP BY source")
-        }
-        last_item = conn.execute("SELECT MAX(collected_at) FROM items").fetchone()[0]
-        last_run = conn.execute(
-            "SELECT started_at, finished_at, fetched, inserted, failed_sources "
-            "FROM runs ORDER BY id DESC LIMIT 1"
-        ).fetchone()
+def recent_items(days: int) -> list[dict]:
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
+    items = [r for r in all_items() if r["collected_at"] >= since]
+    items.sort(key=lambda r: (r["score"], r["collected_at"]), reverse=True)
+    return items
+
+
+def stats() -> dict:
+    items = all_items()
+    by_cat: dict[str, int] = {}
+    by_src: dict[str, int] = {}
+    for r in items:
+        by_cat[r["category"]] = by_cat.get(r["category"], 0) + 1
+        by_src[r["source"]] = by_src.get(r["source"], 0) + 1
     return {
-        "total": total,
+        "total": len(items),
         "by_category": by_cat,
         "by_source": by_src,
-        "last_collected_at": last_item,
-        "last_run": _run_row(last_run),
+        "last_collected_at": max((r["collected_at"] for r in items), default=None),
+        "last_run": last_run(),
     }
-
-
-def last_run(path: Path | None = None) -> dict | None:
-    with connect(path) as conn:
-        return _run_row(
-            conn.execute(
-                "SELECT started_at, finished_at, fetched, inserted, failed_sources "
-                "FROM runs ORDER BY id DESC LIMIT 1"
-            ).fetchone()
-        )
-
-
-def _row(r: sqlite3.Row) -> dict:
-    d = dict(r)
-    d["keywords_matched"] = json.loads(d["keywords_matched"])
-    return d
-
-
-def _run_row(r: sqlite3.Row | None) -> dict | None:
-    if r is None:
-        return None
-    d = dict(r)
-    d["failed_sources"] = json.loads(d["failed_sources"])
-    return d

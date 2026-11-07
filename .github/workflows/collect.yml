@@ -36,11 +36,17 @@ jobs:
 
       - name: Commit data changes (only if changed)
         run: |
+          # 수집기가 data/daily 를 만들지 못했다면 커밋할 것이 없다
+          if [ ! -d data ]; then
+            echo "data 폴더가 없습니다. 커밋을 건너뜁니다."
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- data/daily
+          git add -A data
+          # 스테이징된 변경이 없으면 커밋·푸시하지 않는다
           if git diff --cached --quiet; then
-            echo "데이터 변경 없음. 커밋하지 않습니다."
+            echo "데이터 변경 없음. 커밋·푸시를 건너뜁니다."
             exit 0
           fi
           git commit -m "log: collect data $(date -u +%Y-%m-%dT%H:%MZ)"

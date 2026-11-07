@@ -27,10 +27,12 @@ def profile():
 
 @pytest.fixture
 def tmp_db(tmp_path, monkeypatch):
-    path = tmp_path / "t.db"
-    monkeypatch.setattr(storage, "DB_PATH", path)
+    """저장소를 임시 폴더(data/daily 대체)로 돌린다. 실제 data/ 는 건드리지 않는다."""
+    daily = tmp_path / "daily"
+    monkeypatch.setattr(storage, "DAILY_DIR", daily)
+    monkeypatch.setattr(storage, "RUNS_FILE", daily / "runs.jsonl")
     storage.init_db()
-    return path
+    return daily
 
 
 # ---- URL 정규화 / 해시
@@ -101,17 +103,33 @@ def test_insert_dedups_across_runs(tmp_db):
     row = {"title": "t", "url": "https://ex.com/a/", "source": "s", "category": "도구",
            "keywords_matched": ["Claude"], "score": 3.0}
     dup = dict(row, url="https://ex.com/a?utm_medium=y")
-    assert storage.insert_items([row], tmp_db) == 1
-    assert storage.insert_items([dup], tmp_db) == 0
-    assert storage.stats(tmp_db)["total"] == 1
+    assert storage.insert_items([row]) == 1
+    assert storage.insert_items([dup]) == 0
+    assert storage.stats()["total"] == 1
 
 
 def test_latest_filters_by_category(tmp_db):
     base = {"source": "s", "keywords_matched": [], "score": 1.0}
     storage.insert_items([dict(base, title="a", url="https://a", category="도구"),
-                          dict(base, title="b", url="https://b", category="기술")], tmp_db)
-    got = storage.latest("도구", 10, tmp_db)
+                          dict(base, title="b", url="https://b", category="기술")])
+    got = storage.latest("도구", 10)
     assert [r["title"] for r in got] == ["a"]
+
+
+def test_empty_run_still_creates_folder_and_today_file(tmp_db):
+    """수집 0건이어도 data/daily 폴더와 오늘 JSONL 파일이 생겨야 한다 (CI의 git add 실패 방지)."""
+    assert storage.insert_items([]) == 0
+    assert tmp_db.is_dir()
+    assert storage.daily_path().exists()
+    assert storage.daily_path().parent == tmp_db
+
+
+def test_items_append_as_jsonl_lines(tmp_db):
+    storage.insert_items([{"title": "x", "url": "https://x", "source": "s", "category": "도구",
+                           "keywords_matched": ["Claude"], "score": 3.0}])
+    lines = storage.daily_path().read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+    assert '"title": "x"' in lines[0]
 
 
 # ---- 수집 1회: 소스 하나가 실패해도 나머지는 저장된다
@@ -127,8 +145,32 @@ def test_collector_continues_after_source_failure(tmp_db, monkeypatch):
     assert summary["inserted"] == 1
     assert summary["failed_sources"][0]["source"] == "bad"
     assert "429" in summary["failed_sources"][0]["error"]
-    last = storage.last_run(tmp_db)
+    last = storage.last_run()
     assert last["inserted"] == 1 and last["failed_sources"][0]["source"] == "bad"
+    # 실행 기록과 오늘 파일이 모두 생겼는지
+    assert storage.daily_path().exists()
+    assert (tmp_db / "runs.jsonl").exists()
+
+
+def test_collector_zero_items_still_writes_files(tmp_db, monkeypatch):
+    """모든 소스가 0건을 돌려줘도 폴더·오늘 파일·실행 기록이 남는다."""
+    monkeypatch.setattr(collector, "SOURCES", [("empty", lambda ctx: [])])
+    summary = collector._run()
+    assert summary["inserted"] == 0
+    assert summary["per_source"]["empty"]["status"] == "성공"
+    assert storage.daily_path().exists()
+    assert storage.last_run() is not None
+
+
+def test_format_table_lists_each_source_status(tmp_db, monkeypatch):
+    def bad(ctx: SourceContext):
+        raise RuntimeError("timeout")
+
+    monkeypatch.setattr(collector, "SOURCES", [("bad", bad), ("empty", lambda ctx: [])])
+    table = collector.format_table(collector._run())
+    assert "bad" in table and "실패" in table
+    assert "empty" in table and "성공" in table
+    assert "성공 1 / 실패 1" in table
 
 
 # ---- 수업 도입 후보 선정
