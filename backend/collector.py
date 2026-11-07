@@ -1,6 +1,8 @@
 """수집 1회 실행. 단독 실행: `python -m backend.collector`
 
 - 소스는 순서대로 실행, 한 소스가 실패해도 나머지는 계속한다.
+- profile 의 collect.korean_only 가 켜져 있으면 제목·요약에 한글이 없는 글은 버린다.
+- 게시일이 profile 의 collect.max_age_days(기본 14일)보다 오래된 항목은 버린다. 게시일이 없는 항목은 판단할 수 없어 남긴다.
 - URL 해시로 실행 내 중복을 먼저 제거하고, 저장 시에는 기존 일별 파일의 id와 대조해 실행 간 중복도 막는다.
 - 결과는 data/daily/YYYY-MM-DD.jsonl 에 append 한다. 수집 건수가 0이어도 폴더와 오늘 파일을 만든다.
 - 이 모듈은 FastAPI 스케줄러에서도 run_once()로 호출된다 (동시 실행은 락으로 막음).
@@ -12,12 +14,13 @@ import json
 import logging
 import sys
 import threading
+from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 
 from backend import storage
 from backend.config import LOG_DIR, load_profile
 from backend.net import PoliteClient
-from backend.scoring import Scorer
+from backend.scoring import HANGUL_RE, Scorer
 from backend.sources import SOURCES, SourceContext
 
 log = logging.getLogger("collector")
@@ -55,6 +58,8 @@ def _run() -> dict:
     scorer = Scorer(profile)
     storage.init_db()  # data/daily 폴더와 오늘 파일을 먼저 만든다 (0건이어도 남도록)
 
+    korean_only = profile["collect"]["korean_only"]
+    cutoff = datetime.now(timezone.utc) - timedelta(days=profile["collect"]["max_age_days"])
     started = storage.now_iso()
     client = PoliteClient()
     ctx = SourceContext(client=client, profile=profile)
@@ -73,12 +78,20 @@ def _run() -> dict:
                 err = f"{type(exc).__name__}: {exc}"[:300]
                 log.warning("소스 실패 %s: %s", name, err)
                 failed.append({"source": name, "error": err})
-                per_source[name] = {"status": "실패", "raw": 0, "matched": 0, "error": err}
+                per_source[name] = {"status": "실패", "raw": 0, "stale": 0, "non_ko": 0, "matched": 0, "error": err}
                 continue
 
             fetched += len(raws)
             kept = 0
+            stale = 0
+            non_ko = 0
             for raw in raws:
+                if raw.published_at is not None and raw.published_at < cutoff:
+                    stale += 1
+                    continue
+                if korean_only and not HANGUL_RE.search(f"{raw.title} {raw.summary}"):
+                    non_ko += 1
+                    continue
                 key = storage.url_id(raw.url)
                 if key in seen:
                     continue
@@ -86,10 +99,18 @@ def _run() -> dict:
                 scored = scorer.score(raw)
                 if scored is None:
                     continue
-                rows.append({"title": raw.title, "url": raw.url, "source": raw.source, **scored})
+                rows.append({
+                    "title": raw.title,
+                    "url": raw.url,
+                    "source": raw.source,
+                    "published_at": raw.published_at.isoformat(timespec="seconds") if raw.published_at else None,
+                    **scored,
+                })
                 kept += 1
-            per_source[name] = {"status": "성공", "raw": len(raws), "matched": kept, "error": None}
-            log.info("소스 %s: 원본 %d건, 관련 %d건", name, len(raws), kept)
+            per_source[name] = {"status": "성공", "raw": len(raws), "stale": stale, "non_ko": non_ko,
+                              "matched": kept, "error": None}
+            log.info("소스 %s: 원본 %d건, 기간 초과 %d건, 비한국어 %d건, 관련 %d건",
+                     name, len(raws), stale, non_ko, kept)
     finally:
         client.close()
 
@@ -113,10 +134,10 @@ def _run() -> dict:
 
 def format_table(summary: dict) -> str:
     """소스별 성공/실패 건수를 사람이 읽는 표로 만든다."""
-    lines = [f"{'소스':<18}{'상태':<6}{'원본':>7}{'관련':>7}  비고"]
+    lines = [f"{'소스':<18}{'상태':<6}{'원본':>7}{'기간초과':>8}{'비한국어':>8}{'관련':>7}  비고"]
     for name, v in summary["per_source"].items():
         note = v["error"] or ""
-        lines.append(f"{name:<18}{v['status']:<6}{v['raw']:>7}{v['matched']:>7}  {note}")
+        lines.append(f"{name:<18}{v['status']:<6}{v['raw']:>7}{v.get('stale', 0):>8}{v.get('non_ko', 0):>8}{v['matched']:>7}  {note}")
     lines.append(
         f"합계: 성공 {summary['sources_ok']} / 실패 {summary['sources_failed']} · "
         f"원본 {summary['fetched']}건 · 관련 {summary['matched']}건 · 신규 저장 {summary['inserted']}건"

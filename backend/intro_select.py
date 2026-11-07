@@ -2,7 +2,7 @@
 
 실행: python3 -m backend.intro_select [--topic 주제] [--days 7] [--per-category 3]
 
-주의: 기간 기준은 collected_at(수집 시각)이다. 기사 발행일이 아니다.
+기간 기준은 published_at(원문 게시 시각)이고, 게시 시각이 없는 항목은 collected_at(수집 시각)으로 대신한다.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ def select_candidates(rows: list[dict], topic: str | None = None, per_category: 
             r for r in rows
             if t in r["title"].lower() or any(t in k.lower() for k in r["keywords_matched"])
         ]
-    # 입력은 score DESC, collected_at DESC 순서. 안정 정렬이라 동점은 최신 수집 순서를 유지한다.
+    # 입력은 score DESC, 게시 시각 DESC 순서. 안정 정렬이라 동점은 최신 수집 순서를 유지한다.
     ordered = sorted(rows, key=lambda r: r["score"], reverse=True)
 
     grouped: dict[str, list[dict]] = defaultdict(list)
@@ -43,7 +43,7 @@ def select_candidates(rows: list[dict], topic: str | None = None, per_category: 
 
 
 def recent_rows(days: int) -> list[dict]:
-    """최근 N일 수집 항목 (score DESC, collected_at DESC)."""
+    """최근 N일 항목 (score DESC, 게시 시각 DESC)."""
     return storage.recent_items(days)
 
 

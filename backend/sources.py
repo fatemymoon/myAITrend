@@ -1,21 +1,29 @@
 """수집 소스. 소스당 함수 하나. 함수는 RawItem 목록을 반환하고, 실패하면 예외를 던진다.
 
-각 URL은 실제 접속해 응답 형식을 확인했다 (2026-11-07 기준):
-- hacker_news : hn.algolia.com/api/v1/search(_by_date) JSON, hits[].{title,url,objectID,points}
+수집 대상은 한국어 블로그·커뮤니티 게시물로 한정한다 (2026-11-07 결정).
+각 URL은 실제 접속해 robots.txt 허용·응답 형식·한국어 여부를 확인했다 (2026-11-07 기준):
 - geeknews    : news.hada.io/rss/news → feeds.feedburner.com/geeknews-feed (Atom, 20건)
-- hf_daily_papers : huggingface.co/api/daily_papers JSON (50건, paper.{id,title,summary,upvotes})
-- hf_blog     : huggingface.co/blog/feed.xml (RSS 2.0)
-- openai      : openai.com/news/rss.xml (RSS 2.0)
-- deepmind    : deepmind.google/blog/rss.xml (RSS 2.0, 100건)
-- mistral     : mistral.ai/news/rss (RSS 2.0, content-type은 text/plain)
-- aws_ml      : aws.amazon.com/blogs/machine-learning/feed/ (RSS 2.0)
-- google_ai   : blog.google/technology/ai/rss/ → 301 → blog.google/innovation-and-ai/technology/ai/rss/ (RSS, 20건)
-- github_blog : github.blog/feed/ (RSS 2.0)
+- aws_kr      : aws.amazon.com/ko/blogs/tech/feed/ (AWS 한국 블로그, RSS 10건)
+- google_kr   : developers-kr.googleblog.com/feeds/posts/default (Google 개발자 한국 블로그, Atom 15건)
+- naver_d2    : d2.naver.com/d2.atom (Atom 20건)
+- kakao       : tech.kakao.com/feed/ (RSS 10건)
+- lycorp_ko   : techblog.lycorp.co.jp/ko/feed/index.xml (LY Corp 한국어, RSS 50건)
+- banksalad   : blog.banksalad.com/rss.xml (RSS 73건)
+- toss        : toss.tech/rss.xml (RSS 20건)
+- daangn      : medium.com/feed/daangn (당근, RSS 10건, 일부 영어 글)
+- musinsa     : medium.com/feed/musinsa-tech (RSS 10건, 일부 영어 글)
 
-제외한 소스 (확인 결과):
-- arXiv API   : export.arxiv.org/robots.txt 가 "User-agent: * / Disallow: /" → robots 준수 원칙에 따라 제외
-- Anthropic 블로그 : /rss.xml 404, /news 는 HTML만 제공 → RSS 소스 없음으로 제외
-- ai.googleblog.com : atom.xml 404 → 제외
+이전에 쓰다 뺀 소스:
+- OpenAI, DeepMind, Mistral, AWS ML, Google AI, GitHub, HF 블로그 : 영어 블로그라 제외
+- Hacker News : 뉴스 기사·저장소·논문 링크가 섞여 있어 제외
+- HF Daily Papers : 논문이라 제외
+- AI타임스 (aitimes.com/rss/allArticle.xml) : 수집은 되지만 블로그가 아닌 언론 기사라 제외
+
+확인했지만 쓸 수 없는 소스:
+- 우아한형제들 기술블로그, SK DEVOCEAN, Reddit, arXiv : robots.txt 가 수집기 접근을 막음
+- 요즘IT (405), 컬리 (403), 쏘카 (404), 업스테이지 (404), 삼성SDS (XML 아님) : 피드 응답 없음
+- NC 리서치 : 2025-01 이후 새 글 없음
+- Anthropic 블로그 : RSS 없음
 """
 
 from __future__ import annotations
@@ -24,7 +32,8 @@ import html
 import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Callable
 
 import defusedxml.ElementTree as ET
@@ -42,7 +51,8 @@ class RawItem:
     url: str
     source: str
     summary: str = ""
-    points: float | None = None  # HN 포인트 / HF upvotes 등 인기 지표
+    points: float | None = None  # 추천수 등 인기 지표 (현재 소스 중에는 주는 곳이 없음)
+    published_at: datetime | None = None  # 원문 게시 시각 (UTC). 소스가 주지 않으면 None
 
 
 @dataclass
@@ -61,6 +71,30 @@ def _clean(text: str | None, limit: int = 500) -> str:
     return re.sub(r"\s+", " ", text).strip()[:limit]
 
 
+def parse_date(value: str | None) -> datetime | None:
+    """RSS(RFC 822)·Atom/JSON(ISO 8601) 날짜를 UTC datetime 으로. 읽을 수 없으면 None."""
+    if not value or not value.strip():
+        return None
+    value = value.strip()
+    dt: datetime | None = None
+    try:
+        dt = parsedate_to_datetime(value)
+    except (TypeError, ValueError, IndexError):
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+# 게시일 필드 우선순위: 최초 게시 시각을 우선하고, 없을 때만 수정 시각(updated)을 쓴다
+_DATE_FIELDS = ("pubDate", "published", "date", "issued", "updated")
+
+
 def _local(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
@@ -73,6 +107,7 @@ def parse_feed(body: bytes, source: str) -> list[RawItem]:
         if _local(node.tag) not in ("item", "entry"):
             continue
         fields: dict[str, str] = {}
+        dates: dict[str, str] = {}
         link = ""
         for child in node:
             name = _local(child.tag)
@@ -85,11 +120,14 @@ def parse_feed(body: bytes, source: str) -> list[RawItem]:
                     link = child.text.strip()
             elif name in ("title", "description", "summary", "content") and name not in fields:
                 fields[name] = "".join(child.itertext())
+            elif name in _DATE_FIELDS and name not in dates:
+                dates[name] = child.text or ""
         title = _clean(fields.get("title"), 300)
         if not title or not link:
             continue
         summary = _clean(fields.get("summary") or fields.get("description") or fields.get("content"))
-        items.append(RawItem(title=title, url=link, source=source, summary=summary))
+        published = next((d for f in _DATE_FIELDS if (d := parse_date(dates.get(f)))), None)
+        items.append(RawItem(title=title, url=link, source=source, summary=summary, published_at=published))
     return items
 
 
@@ -105,89 +143,19 @@ def _feed_source(name: str, url: str) -> SourceFn:
     return fetch
 
 
-# ---------------------------------------------------------------- Hacker News (Algolia)
-HN_SEARCH = "https://hn.algolia.com/api/v1/search"
-HN_BY_DATE = "https://hn.algolia.com/api/v1/search_by_date"
-
-
-def _hn_hits_to_items(hits: list[dict]) -> list[RawItem]:
-    out: list[RawItem] = []
-    for h in hits:
-        title = (h.get("title") or "").strip()
-        if not title:
-            continue
-        url = h.get("url") or f"https://news.ycombinator.com/item?id={h['objectID']}"
-        out.append(
-            RawItem(title=title, url=url, source="hacker_news", points=float(h.get("points") or 0))
-        )
-    return out
-
-
-def fetch_hacker_news(ctx: SourceContext) -> list[RawItem]:
-    """프론트페이지 + 우선 키워드 최근 3일 검색. 중복은 collector에서 URL 해시로 제거."""
-    items = []
-    front = ctx.client.get(HN_SEARCH, params={"tags": "front_page", "hitsPerPage": 50}).json()
-    items += _hn_hits_to_items(front.get("hits", []))
-
-    since = int((datetime.now(timezone.utc) - timedelta(days=3)).timestamp())
-    for kw in ctx.profile["keywords"]["priority"]:
-        params = {
-            "query": kw,
-            "tags": "story",
-            "hitsPerPage": 20,
-            "numericFilters": f"created_at_i>{since}",
-        }
-        try:
-            res = ctx.client.get(HN_BY_DATE, params=params).json()
-            items += _hn_hits_to_items(res.get("hits", []))
-        except Exception as exc:  # 키워드 하나 실패는 나머지 검색을 막지 않는다
-            log.warning("hacker_news 검색 실패 (%s): %s", kw, exc)
-    return items
-
-
-# ---------------------------------------------------------------- Hugging Face Daily Papers
-def fetch_hf_daily_papers(ctx: SourceContext) -> list[RawItem]:
-    data = ctx.client.get("https://huggingface.co/api/daily_papers").json()
-    items = []
-    for entry in data:
-        paper = entry.get("paper") or {}
-        pid = paper.get("id")
-        title = (entry.get("title") or paper.get("title") or "").strip()
-        if not pid or not title:
-            continue
-        items.append(
-            RawItem(
-                title=title,
-                url=f"https://huggingface.co/papers/{pid}",
-                source="hf_daily_papers",
-                summary=_clean(paper.get("summary") or entry.get("summary")),
-                points=float(paper.get("upvotes") or 0),
-            )
-        )
-    return items
-
-
-# ---------------------------------------------------------------- RSS/Atom 소스
-fetch_geeknews = _feed_source("geeknews", "https://news.hada.io/rss/news")
-fetch_hf_blog = _feed_source("hf_blog", "https://huggingface.co/blog/feed.xml")
-fetch_openai = _feed_source("openai", "https://openai.com/news/rss.xml")
-fetch_deepmind = _feed_source("deepmind", "https://deepmind.google/blog/rss.xml")
-fetch_mistral = _feed_source("mistral", "https://mistral.ai/news/rss")
-fetch_aws_ml = _feed_source("aws_ml", "https://aws.amazon.com/blogs/machine-learning/feed/")
-fetch_google_ai = _feed_source("google_ai", "https://blog.google/innovation-and-ai/technology/ai/rss/")
-fetch_github_blog = _feed_source("github_blog", "https://github.blog/feed/")
-
-
-# 등록 순서 = 실행 순서. 새 소스는 여기에 한 줄 추가.
-SOURCES: list[tuple[str, SourceFn]] = [
-    ("hacker_news", fetch_hacker_news),
-    ("hf_daily_papers", fetch_hf_daily_papers),
-    ("geeknews", fetch_geeknews),
-    ("hf_blog", fetch_hf_blog),
-    ("openai", fetch_openai),
-    ("deepmind", fetch_deepmind),
-    ("mistral", fetch_mistral),
-    ("aws_ml", fetch_aws_ml),
-    ("google_ai", fetch_google_ai),
-    ("github_blog", fetch_github_blog),
+# ---------------------------------------------------------------- RSS/Atom 소스 (한국어)
+FEEDS: list[tuple[str, str]] = [
+    ("geeknews", "https://news.hada.io/rss/news"),
+    ("aws_kr", "https://aws.amazon.com/ko/blogs/tech/feed/"),
+    ("google_kr", "https://developers-kr.googleblog.com/feeds/posts/default"),
+    ("naver_d2", "https://d2.naver.com/d2.atom"),
+    ("kakao", "https://tech.kakao.com/feed/"),
+    ("lycorp_ko", "https://techblog.lycorp.co.jp/ko/feed/index.xml"),
+    ("banksalad", "https://blog.banksalad.com/rss.xml"),
+    ("toss", "https://toss.tech/rss.xml"),
+    ("daangn", "https://medium.com/feed/daangn"),
+    ("musinsa", "https://medium.com/feed/musinsa-tech"),
 ]
+
+# 등록 순서 = 실행 순서. 새 피드는 FEEDS 에 한 줄 추가.
+SOURCES: list[tuple[str, SourceFn]] = [(name, _feed_source(name, url)) for name, url in FEEDS]

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from backend import collector, storage
 from backend.config import load_profile
 from backend.scoring import Scorer
-from backend.sources import RawItem, SourceContext, parse_feed
+from backend.sources import RawItem, SourceContext, parse_date, parse_feed
 
 RSS = b"""<?xml version="1.0"?><rss version="2.0"><channel>
 <item><title>Claude agent update</title><link>https://ex.com/a?utm_source=x#frag</link>
@@ -63,6 +65,27 @@ def test_parse_rejects_entity_declarations():
         parse_feed(evil, "src")
 
 
+# ---- 게시일
+def test_parse_date_handles_rfc822_iso_and_garbage():
+    utc = timezone.utc
+    assert parse_date("Fri, 06 Nov 2026 18:00:00 GMT") == datetime(2026, 11, 6, 18, tzinfo=utc)
+    assert parse_date("2026-11-07T09:00:00+09:00") == datetime(2026, 11, 7, 0, tzinfo=utc)
+    assert parse_date("2026-11-03T19:00:00.000Z") == datetime(2026, 11, 3, 19, tzinfo=utc)
+    assert parse_date("not a date") is None
+    assert parse_date("") is None and parse_date(None) is None
+
+
+def test_parse_feed_reads_pubdate_and_prefers_published_over_updated():
+    rss = b"""<rss><channel><item><title>t</title><link>https://a</link>
+    <pubDate>Fri, 06 Nov 2026 18:00:00 GMT</pubDate></item></channel></rss>"""
+    atom = b"""<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>t</title>
+    <link href="https://b"/><updated>2026-11-07T00:00:00Z</updated>
+    <published>2026-11-01T00:00:00Z</published></entry></feed>"""
+    assert parse_feed(rss, "s")[0].published_at == datetime(2026, 11, 6, 18, tzinfo=timezone.utc)
+    assert parse_feed(atom, "s")[0].published_at == datetime(2026, 11, 1, tzinfo=timezone.utc)
+    assert parse_feed(RSS, "s")[0].published_at is None  # 날짜 없는 피드
+
+
 # ---- 점수 / 카테고리
 def test_priority_keyword_scores_higher_than_general(profile):
     s = Scorer(profile)
@@ -77,12 +100,12 @@ def test_exclude_keyword_drops_item(profile):
 
 
 def test_popularity_alone_does_not_pass(profile):
-    raw = RawItem(title="Tesla recalls cars", url="https://a", source="hacker_news", points=900)
+    raw = RawItem(title="Tesla recalls cars", url="https://a", source="geeknews", points=900)
     assert Scorer(profile).score(raw) is None
 
 
 def test_popularity_boosts_matched_item_and_marks_buzz(profile):
-    raw = RawItem(title="Claude Code is trending", url="https://a", source="hacker_news", points=500)
+    raw = RawItem(title="Claude Code is trending", url="https://a", source="geeknews", points=500)
     res = Scorer(profile).score(raw)
     assert res["score"] == 3 + 2  # 우선 키워드 3 + 인기 상한 2
     assert res["category"] == "유행"
@@ -95,7 +118,7 @@ def test_education_rule_wins_over_tool_rule(profile):
 
 def test_korean_title_bonus(profile):
     raw = RawItem(title="클로드 업무자동화 사례", url="https://a", source="geeknews")
-    assert Scorer(profile).score(raw)["score"] == 4.5  # 우선 업무자동화 3 + 일반 자동화 1 + 한글 0.5
+    assert Scorer(profile).score(raw)["score"] == 9.5  # 우선 클로드·업무자동화·자동화 3씩 + 한글 0.5
 
 
 # ---- 저장 / 중복
@@ -138,7 +161,7 @@ def test_collector_continues_after_source_failure(tmp_db, monkeypatch):
         raise RuntimeError("HTTP 429")
 
     def good(ctx: SourceContext):
-        return [RawItem(title="Claude MCP guide", url="https://ok/1", source="good")]
+        return [RawItem(title="Claude MCP 가이드", url="https://ok/1", source="good")]
 
     monkeypatch.setattr(collector, "SOURCES", [("bad", bad), ("good", good)])
     summary = collector._run()
@@ -194,3 +217,57 @@ def test_intro_topic_filters_by_title_or_keyword():
     res = select_candidates(rows, topic="mcp")
     assert res["candidates_total"] == 1
     assert res["candidates"]["기술"][0]["title"] == "MCP 기술"
+
+
+# ---- 기간 필터 / 게시일 저장·정렬
+def test_collector_drops_old_items_and_keeps_undated(tmp_db, monkeypatch):
+    now = datetime.now(timezone.utc)
+
+    def src(ctx: SourceContext):
+        return [
+            RawItem(title="Claude 새 글", url="https://n/1", source="s", published_at=now - timedelta(days=1)),
+            RawItem(title="Claude 옛 글", url="https://n/2", source="s", published_at=now - timedelta(days=400)),
+            RawItem(title="Claude 날짜 없음", url="https://n/3", source="s"),
+        ]
+
+    monkeypatch.setattr(collector, "SOURCES", [("s", src)])
+    summary = collector._run()
+    assert summary["per_source"]["s"]["stale"] == 1
+    saved = {r["title"]: r for r in storage.all_items()}
+    assert set(saved) == {"Claude 새 글", "Claude 날짜 없음"}
+    assert saved["Claude 새 글"]["published_at"].startswith((now - timedelta(days=1)).date().isoformat())
+    assert saved["Claude 날짜 없음"]["published_at"] is None
+
+
+def test_latest_sorts_by_published_at(tmp_db):
+    base = {"source": "s", "keywords_matched": [], "score": 1.0, "category": "도구"}
+    storage.insert_items([
+        dict(base, title="older", url="https://o", published_at="2026-11-01T00:00:00+00:00"),
+        dict(base, title="newer", url="https://n", published_at="2026-11-06T00:00:00+00:00"),
+    ])
+    assert [r["title"] for r in storage.latest(None, 10)] == ["newer", "older"]
+
+
+def test_collector_keeps_only_korean_posts(tmp_db, monkeypatch):
+    def src(ctx: SourceContext):
+        return [
+            RawItem(title="Claude agent 도입기", url="https://k/1", source="s"),
+            RawItem(title="Claude agent in production", url="https://k/2", source="s"),
+            RawItem(title="Claude agent", url="https://k/3", source="s", summary="사내 적용 사례"),
+        ]
+
+    monkeypatch.setattr(collector, "SOURCES", [("s", src)])
+    summary = collector._run()
+    assert summary["per_source"]["s"]["non_ko"] == 1
+    assert {r["url"] for r in storage.all_items()} == {"https://k/1", "https://k/3"}
+
+
+def test_korean_only_profile_is_on(profile):
+    assert profile["collect"]["korean_only"] is True
+
+
+def test_korean_keywords_score_like_english(profile):
+    s = Scorer(profile)
+    ko = s.score(RawItem(title="클로드 에이전트 활용기", url="https://a", source="naver_d2"))
+    en = s.score(RawItem(title="Claude agent 활용기", url="https://b", source="naver_d2"))
+    assert ko["score"] == en["score"] == 6.5  # 우선 3 + 우선 3 + 한글 0.5
