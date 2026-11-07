@@ -2,7 +2,7 @@ name: collect
 
 on:
   schedule:
-    - cron: "*/10 * * * *"   # GitHub 스케줄은 수 분 지연될 수 있다
+    - cron: "*/30 * * * *"   # 30분마다 수집·커밋 (GitHub 스케줄은 수 분 지연될 수 있다)
   workflow_dispatch:
 
 permissions:

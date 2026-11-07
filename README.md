@@ -11,7 +11,7 @@ uvicorn backend.main:app --port 8000 # API 서버 (10분 주기 수집 포함)
 
 ## 자동 수집 (GitHub Actions)
 
-`.github/workflows/collect.yml` 이 10분마다 수집기를 실행하고, `data/daily/` 에 변경이 있을 때만 커밋·푸시합니다.
+`.github/workflows/collect.yml` 이 30분마다 수집기를 실행하고, `data/daily/` 에 변경이 있을 때만 커밋·푸시합니다.
 수동 실행은 Actions 탭의 `collect` → `Run workflow` 입니다.
 
 ### GitHub Secrets
