@@ -28,6 +28,7 @@ def load_profile(path: Path = PROFILE_PATH) -> dict[str, Any]:
     }
     data.setdefault("categories", ["최신기술동향", "교육소식", "도구", "기술", "유행"])
     data.setdefault("category_rules", {})
+    data["education_requires_ai"] = [str(k) for k in data.get("education_requires_ai") or []]
     data.setdefault("scoring", {})
     data["scoring"].setdefault("min_score", 1)
     data["scoring"].setdefault("buzz_min_points", 100)

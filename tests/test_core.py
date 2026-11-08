@@ -8,7 +8,7 @@ import pytest
 
 from backend import collector, storage
 from backend.config import load_profile
-from backend.scoring import Scorer
+from backend.scoring import Scorer, detect_lang
 from backend.sources import RawItem, SourceContext, parse_date, parse_feed
 
 RSS = b"""<?xml version="1.0"?><rss version="2.0"><channel>
@@ -248,7 +248,16 @@ def test_latest_sorts_by_published_at(tmp_db):
     assert [r["title"] for r in storage.latest(None, 10)] == ["newer", "older"]
 
 
-def test_collector_keeps_only_korean_posts(tmp_db, monkeypatch):
+def _profile_korean_only(on: bool):
+    def load():
+        p = load_profile()
+        p["collect"]["korean_only"] = on
+        return p
+    return load
+
+
+def test_collector_korean_only_switch_drops_non_hangul(tmp_db, monkeypatch):
+    """korean_only 를 켜면 한글 없는 글을 버린다 (기본 프로필은 꺼져 있음)."""
     def src(ctx: SourceContext):
         return [
             RawItem(title="Claude agent 도입기", url="https://k/1", source="s"),
@@ -257,13 +266,56 @@ def test_collector_keeps_only_korean_posts(tmp_db, monkeypatch):
         ]
 
     monkeypatch.setattr(collector, "SOURCES", [("s", src)])
+    monkeypatch.setattr(collector, "load_profile", _profile_korean_only(True))
     summary = collector._run()
     assert summary["per_source"]["s"]["non_ko"] == 1
     assert {r["url"] for r in storage.all_items()} == {"https://k/1", "https://k/3"}
 
 
-def test_korean_only_profile_is_on(profile):
-    assert profile["collect"]["korean_only"] is True
+def test_collector_keeps_english_and_tags_lang(tmp_db, monkeypatch):
+    def src(ctx: SourceContext):
+        return [
+            RawItem(title="Claude agent 도입기", url="https://k/1", source="s"),
+            RawItem(title="Claude agent in production", url="https://k/2", source="s"),
+        ]
+
+    monkeypatch.setattr(collector, "SOURCES", [("s", src)])
+    collector._run()
+    langs = {r["url"]: r["lang"] for r in storage.all_items()}
+    assert langs == {"https://k/1": "ko", "https://k/2": "en"}
+
+
+def test_default_profile_collects_non_korean(profile):
+    assert profile["collect"]["korean_only"] is False
+
+
+def test_detect_lang():
+    assert detect_lang("클로드 에이전트") == "ko"
+    assert detect_lang("Claude agents") == "en"
+    assert detect_lang("人工知能") == "other"
+
+
+def test_short_english_keyword_needs_word_boundary(profile):
+    s = Scorer(profile)
+    # "AI" 가 Airbnb·Aim 에 걸리면 안 된다 (영어 소스에서 오탐이 생긴다)
+    r = s.score(RawItem(title="Airbnb aim to hire Claude LLM", url="https://a", source="x"))
+    assert "AI" not in r["keywords_matched"]
+    assert s.score(RawItem(title="AI-powered tools and LLM", url="https://b", source="x")) is not None
+
+
+def test_education_requires_ai_keyword(profile):
+    s = Scorer(profile)
+    no_ai = s.score(RawItem(title="신임 부교육감 부임", url="https://a", source="x", summary="교육 학습 강의 소식"))
+    with_ai = s.score(RawItem(title="AI 교육 강의 개설", url="https://b", source="x"))
+    assert no_ai is None
+    assert with_ai is not None and with_ai["category"] == "교육소식"
+
+
+def test_education_rule_off_when_list_empty(profile):
+    profile["education_requires_ai"] = []
+    s = Scorer(profile)
+    r = s.score(RawItem(title="교육 강의 프롬프트 소식", url="https://a", source="x"))
+    assert r is not None and r["category"] == "교육소식"
 
 
 def test_korean_keywords_score_like_english(profile):

@@ -39,10 +39,38 @@ keywords:
   exclude:                # 제목/요약에 하나라도 있으면 수집 제외
     - 광고
     - 코인
+    - sponsored
+    - bitcoin
+    - cryptocurrency
+
+# 교육소식 카테고리로 분류될 항목에 이 중 하나가 제목·요약에 있어야 수집한다 (AI 무관 교육 기사 차단).
+# 비어 있으면 규칙을 쓰지 않는다. 3글자 이하 영문은 단어 경계로 매칭된다.
+education_requires_ai:
+  - AI
+  - 인공지능
+  - LLM
+  - 생성형
+  - 언어 모델
+  - 언어모델
+  - 프롬프트
+  - 챗GPT
+  - ChatGPT
+  - GPT
+  - Claude
+  - 클로드
+  - 에이전트
+  - agent
+  - MCP
+  - Copilot
+  - 코파일럿
+  - 머신러닝
+  - 딥러닝
+  - machine learning
+  - generative
 
 collect:
   max_age_days: 14        # 게시된 지 이 일수가 지난 글은 수집하지 않음 (게시일이 없는 글은 수집)
-  korean_only: true       # 제목·요약에 한글이 없는 글은 수집하지 않음
+  korean_only: false      # true 면 제목·요약에 한글이 없는 글은 수집하지 않음. false 면 영어 등도 수집하고 lang 필드(ko/en/other)를 붙인다 (번역은 요약 단계에서)
 
 scoring:
   min_score: 2            # 이 점수 미만 항목은 저장하지 않음 (일반 키워드 1개만 걸린 기사 제외)

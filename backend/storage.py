@@ -106,6 +106,7 @@ def insert_items(rows: list[dict]) -> int:
                     "title": r["title"],
                     "url": r["url"],
                     "source": r["source"],
+                    "lang": r.get("lang"),
                     "category": r["category"],
                     "keywords_matched": r["keywords_matched"],
                     "score": r["score"],

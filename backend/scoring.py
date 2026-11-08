@@ -8,13 +8,28 @@ from dataclasses import dataclass, field
 from backend.sources import RawItem
 
 HANGUL_RE = re.compile(r"[가-힣]")
+LATIN_RE = re.compile(r"[A-Za-z]")
 DEFAULT_CATEGORY = "최신기술동향"
 BUZZ_CATEGORY = "유행"
+EDU_CATEGORY = "교육소식"
+
+
+def detect_lang(title: str) -> str:
+    """제목 기준 언어 태그: 한글이 있으면 ko, 영문자가 있으면 en, 그 외 other.
+    번역은 수집 때 하지 않는다. 요약을 쓰는 쪽(루틴·log-writer·intro-writer)이 en/other 를 한글로 옮긴다."""
+    if HANGUL_RE.search(title):
+        return "ko"
+    return "en" if LATIN_RE.search(title) else "other"
 
 
 def _pattern(keyword: str) -> re.Pattern[str]:
-    # 앞쪽 글자 경계만 본다: "agent"는 "agents"에 매칭, "AI"는 "email"에 매칭되지 않음
-    return re.compile(r"(?<![A-Za-z0-9])" + re.escape(keyword), re.IGNORECASE)
+    # 앞쪽 글자 경계를 본다: "agent"는 "agents"에 매칭, "AI"는 "email"에 매칭되지 않음
+    # 3글자 이하 영문 키워드(AI, MCP, cli ...)는 뒤쪽 경계도 본다: "AI"가 "Airbnb"·"Aim"에, "cli"가 "client"에 걸리지 않게
+    # (복수형 s 는 허용: "AIs"). 영어 소스를 받으면서 필요해졌다.
+    head = r"(?<![A-Za-z0-9])" + re.escape(keyword)
+    if keyword.isascii() and len(keyword) <= 3:
+        head += r"(?:s)?(?![A-Za-z0-9])"
+    return re.compile(head, re.IGNORECASE)
 
 
 @dataclass
@@ -25,6 +40,7 @@ class Scorer:
     _exclude: list[re.Pattern] = field(init=False)
     _rules: list[tuple[str, list[re.Pattern]]] = field(init=False)
     _buzz_sources: set[str] = field(init=False)
+    _edu_ai: list[re.Pattern] = field(init=False)
 
     def __post_init__(self) -> None:
         kw = self.profile["keywords"]
@@ -39,6 +55,8 @@ class Scorer:
             for cat, words in rules_raw.items()
             if cat in self.profile["categories"]
         ]
+        # 교육소식은 AI 키워드가 하나라도 있어야 한다. 목록이 비어 있으면 규칙을 쓰지 않는다.
+        self._edu_ai = [_pattern(k) for k in self.profile.get("education_requires_ai", [])]
         self._korean = self.profile.get("language") == "ko"
         s = self.profile["scoring"]
         self._min_score = float(s["min_score"])
@@ -67,8 +85,12 @@ class Scorer:
         if total < self._min_score:
             return None
 
+        category = self._category(text, raw)
+        if category == EDU_CATEGORY and self._edu_ai and not any(p.search(text) for p in self._edu_ai):
+            return None  # AI와 무관한 교육 기사(인사·정책 등)는 수집하지 않는다
+
         return {
-            "category": self._category(text, raw),
+            "category": category,
             "keywords_matched": matched,
             "score": total,
         }
