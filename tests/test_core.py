@@ -285,6 +285,21 @@ def test_collector_keeps_english_and_tags_lang(tmp_db, monkeypatch):
     assert langs == {"https://k/1": "ko", "https://k/2": "en"}
 
 
+def test_old_items_without_lang_get_lang_on_read(tmp_db):
+    """lang 도입 전 항목(파일에 lang 없음)도 읽을 때 채워지고, 파일은 그대로 둔다."""
+    line = '{"id": "a", "title": "클로드 활용기", "url": "https://o/1", "source": "s", "category": "도구", "keywords_matched": [], "score": 3, "published_at": null, "collected_at": "2026-11-07T00:00:00+00:00"}'
+    path = storage.touch_today()
+    path.write_text(line + "\n", encoding="utf-8")
+    assert storage.all_items()[0]["lang"] == "ko"
+    assert "lang" not in path.read_text(encoding="utf-8")
+
+
+def test_insert_fills_missing_lang(tmp_db):
+    storage.insert_items([{"title": "Claude agent", "url": "https://n/1", "source": "s", "category": "도구",
+                           "keywords_matched": ["Claude"], "score": 3.0, "published_at": None}])
+    assert storage.all_items()[0]["lang"] == "en"
+
+
 def test_default_profile_collects_non_korean(profile):
     assert profile["collect"]["korean_only"] is False
 

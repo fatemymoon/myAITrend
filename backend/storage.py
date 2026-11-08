@@ -18,6 +18,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 from backend.config import DAILY_DIR, RUNS_FILE
+from backend.scoring import detect_lang
 
 KST = ZoneInfo("Asia/Seoul")
 _TRACKING_PARAMS = {"fbclid", "gclid", "ref", "ref_src", "source"}
@@ -84,6 +85,11 @@ def all_items() -> list[dict]:
     items: list[dict] = []
     for f in _item_files():
         items.extend(_read_jsonl(f))
+    # lang 필드가 생기기 전(2026-11-08 이전)에 쌓인 항목은 파일에 lang 이 없다. 파일은 append-only 라 고치지 않고,
+    # 읽을 때 제목으로 채운다 (API·요약·intro 는 항상 lang 이 있는 것으로 다룰 수 있다).
+    for r in items:
+        if not r.get("lang"):
+            r["lang"] = detect_lang(r.get("title", ""))
     return items
 
 
@@ -106,7 +112,7 @@ def insert_items(rows: list[dict]) -> int:
                     "title": r["title"],
                     "url": r["url"],
                     "source": r["source"],
-                    "lang": r.get("lang"),
+                    "lang": r.get("lang") or detect_lang(r["title"]),
                     "category": r["category"],
                     "keywords_matched": r["keywords_matched"],
                     "score": r["score"],
