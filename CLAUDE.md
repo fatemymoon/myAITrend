@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt   # runtime + pytest
-python -m pytest -q                                       # all tests (26, no network)
-python -m pytest tests/test_core.py::test_collector_keeps_only_korean_posts -q   # single test
+python -m pytest -q                                       # all tests (31, no network)
+python -m pytest tests/test_core.py::test_collector_korean_only_switch_drops_non_hangul -q   # single test
 python -m backend.collector                               # one collection run (real network)
 uvicorn backend.main:app --port 8000                      # API + homepage + in-process 10-min scheduler
 python -m backend.intro_select                            # intro candidate selection (CLI)
@@ -21,8 +21,8 @@ There is no linter or build step configured. Run only one uvicorn worker: the sc
 
 - **Storage is JSONL, not a database.** Items go to `data/daily/YYYY-MM-DD.jsonl` (KST date, append-only). Run records go to `data/daily/runs.jsonl`. `storage.all_items()` reads every daily file, so the dedupe key `id` (SHA-256 of the canonicalized URL, see `canonical_url`) is checked across all days. `storage.init_db()` is a historical name that only creates the folder and today's file.
 - **Sources are plain functions** registered in the `SOURCES` list in `sources.py`. Each returns `RawItem`s or raises. `collector._run` catches per-source exceptions, so one failing source never stops the run; its failure is recorded in `runs.jsonl`. Adding a source means writing a function and appending it to `SOURCES`.
-- **Filtering happens in `collector._run`, in this order:** drop items older than `collect.max_age_days` (undated items are kept), drop non-Hangul items when `collect.korean_only` is set, dedupe by URL within the run, score via `Scorer` (items that score `None` are dropped), then `storage.insert_items` dedupes against existing files.
-- **Scoring is keyword-driven from the profile.** Priority keywords weigh 3, general keywords 1, excluded keywords drop the item. Category comes from `category_rules` in `profile.yaml` (first category whose keyword list matches wins), then the 유행 rule, then the default 최신기술동향. Popularity alone never passes: an item needs at least one profile keyword, and points only add a bonus.
+- **Filtering happens in `collector._run`, in this order:** drop items older than `collect.max_age_days` (undated items are kept), drop non-Hangul items only when `collect.korean_only` is set (default off since 2026-11-08; items carry a `lang` field `ko`/`en`/`other` instead), dedupe by URL within the run, score via `Scorer` (items that score `None` are dropped), then `storage.insert_items` dedupes against existing files.
+- **Scoring is keyword-driven from the profile.** Priority keywords weigh 3, general keywords 1, excluded keywords drop the item. Category comes from `category_rules` in `profile.yaml` (first category whose keyword list matches wins), then the 유행 rule, then the default 최신기술동향. An item that lands in 교육소식 is dropped unless it also matches one of `education_requires_ai`. Keywords of 3 ASCII letters or fewer (AI, MCP, cli) match on word boundaries on both sides. Popularity alone never passes: an item needs at least one profile keyword, and points only add a bonus.
 - **Network politeness lives in `PoliteClient`:** a fixed User-Agent, per-host minimum interval, robots.txt checks (401/403 on robots.txt means disallow-all; unreachable robots.txt also disallows for that run), and a 10 MB response cap. All source fetches must go through it.
 - **Two entry points run collection:** the CLI (`python -m backend.collector`, used by GitHub Actions) and the FastAPI lifespan scheduler in `main.py`. Both call `collector.run_once()`.
 - **Frontend** is a single static file, `frontend/index.html`, served at `/` and reading `/latest` and `/stats`.
@@ -36,8 +36,12 @@ There is no linter or build step configured. Run only one uvicorn worker: the sc
 ## Known inconsistencies
 
 - `README.md` and the workflow say 30-minute collection; `backend/main.py` schedules the in-process job every 10 minutes (`SCHEDULE_MINUTES`). Treat `main.py` as the source of truth for the server, the workflow for GitHub Actions.
-- `.claude/commands/heal.md` and `.claude/agents/ops-monitor.md` still refer to `data/trends.db` and a 10-minute cycle. Storage is now `data/daily/*.jsonl`; update those files before relying on their checks.
+- `.claude/agents/ops-monitor.md` judges liveness against the GitHub Actions 30-minute cycle (stale after 60 minutes); the server's 10-minute scheduler is only a secondary case. `intro-writer.md` and `log-writer.md` still say "DB" in prose, but they read the JSONL files.
 - `data/daily/` is committed by automation. Do not hand-edit those JSONL files; they are append-only and deduped by `id`.
+
+## Translation
+
+The collector never translates (no LLM key in Actions). Non-Korean titles are stored as-is with `lang`; whoever writes a summary (the cloud routine, `log-writer`, `intro-writer`) translates `en`/`other` titles into Korean and keeps the original in parentheses.
 
 ## Language
 

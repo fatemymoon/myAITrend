@@ -18,7 +18,7 @@ uvicorn backend.main:app --port 8000 # API 서버 (10분 주기 수집 포함)
 
 ### GitHub Secrets
 
-현재 수집 소스(GeekNews와 AWS·Google·네이버·카카오·LY·뱅크샐러드·토스·당근·무신사의 한국어 기술 블로그)는
+현재 수집 소스(GeekNews, 한국어 기술 블로그, 교육·AI 매체, OpenAI·Hugging Face·TechCrunch 등 영어 소스 35곳. 목록은 `backend/sources.py`)는
 인증키가 필요 없어서 **등록할 Secret이 없습니다.**
 
 나중에 인증이 필요한 소스를 추가하면 키 값은 코드에 쓰지 말고, 저장소 Settings → Secrets and variables → Actions 에 아래 형식으로 등록하고 워크플로에서 `${{ secrets.<이름> }}` 로 참조합니다.

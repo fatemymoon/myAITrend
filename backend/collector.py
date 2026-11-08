@@ -20,7 +20,7 @@ from logging.handlers import RotatingFileHandler
 from backend import storage
 from backend.config import LOG_DIR, load_profile
 from backend.net import PoliteClient
-from backend.scoring import HANGUL_RE, Scorer
+from backend.scoring import HANGUL_RE, Scorer, detect_lang
 from backend.sources import SOURCES, SourceContext
 
 log = logging.getLogger("collector")
@@ -103,6 +103,7 @@ def _run() -> dict:
                     "title": raw.title,
                     "url": raw.url,
                     "source": raw.source,
+                    "lang": detect_lang(raw.title),
                     "published_at": raw.published_at.isoformat(timespec="seconds") if raw.published_at else None,
                     **scored,
                 })

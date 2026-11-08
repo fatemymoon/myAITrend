@@ -1,6 +1,7 @@
 """수집 소스. 소스당 함수 하나. 함수는 RawItem 목록을 반환하고, 실패하면 예외를 던진다.
 
-수집 대상은 한국어 블로그·커뮤니티 게시물로 한정한다 (2026-11-07 결정).
+수집 대상은 처음엔 한국어 블로그·커뮤니티로 한정했으나(2026-11-07), 2026-11-08 에 영어 소스와 언론 매체까지 넓혔다.
+영어 등 비한국어 항목은 그대로 저장하고 lang 필드(en/other)로 표시한다. 한글 번역은 수집이 아니라 요약 단계에서 한다.
 각 URL은 실제 접속해 robots.txt 허용·응답 형식·한국어 여부를 확인했다 (2026-11-07 기준):
 - geeknews    : news.hada.io/rss/news → feeds.feedburner.com/geeknews-feed (Atom, 20건)
 - aws_kr      : aws.amazon.com/ko/blogs/tech/feed/ (AWS 한국 블로그, RSS 10건)
@@ -12,14 +13,24 @@
 - toss        : toss.tech/rss.xml (RSS 20건)
 - daangn      : medium.com/feed/daangn (당근, RSS 10건, 일부 영어 글)
 - musinsa     : medium.com/feed/musinsa-tech (RSS 10건, 일부 영어 글)
+- edupress    : edupress.kr/rss/allArticle.xml (에듀프레스, 교육 정책 매체, RSS 50건, robots 허용)
+- kyosu       : kyosu.net/rss/allArticle.xml (교수신문, 대학·AI 관련 기사 비중 높음, RSS 50건, robots 허용)
+- newsedu     : newsedu.kr/rss/allArticle.xml (에듀뉴스, 시도교육청 AI·연수 소식, RSS 50건, robots 허용)
+  위 3곳은 언론 매체다. 교육 분야 기사가 블로그에 거의 없어 예외로 넣었다. AI·교육 키워드가 없는 정책·인사 기사는 점수 필터가 걸러낸다.
+
+영어 소스 (2026-11-08 추가, 모두 robots 허용·응답 확인): openai, deepmind, huggingface, github_ai, aws_ml, mistral,
+mit_tr, techcrunch_ai, verge_ai, wired_ai, simonwillison, latent_space, oneusefulthing, jackclark, interconnects,
+producthunt_ai (AI 도구 신작), thejournal·edtechmagazine (미국 교육 기술), hn_ai (Hacker News AI 검색)
+한국어 AI·IT 매체 (같은 날 추가): aitimes, itworld_kr, bloter
 
 이전에 쓰다 뺀 소스:
-- OpenAI, DeepMind, Mistral, AWS ML, Google AI, GitHub, HF 블로그 : 영어 블로그라 제외
-- Hacker News : 뉴스 기사·저장소·논문 링크가 섞여 있어 제외
 - HF Daily Papers : 논문이라 제외
-- AI타임스 (aitimes.com/rss/allArticle.xml) : 수집은 되지만 블로그가 아닌 언론 기사라 제외
 
-확인했지만 쓸 수 없는 소스:
+확인했지만 쓸 수 없는 소스 (2026-11-08 영어 후보 포함):
+- Import AI(substack)·The Batch(deeplearning.ai)·Class Central·CIO Korea : robots 또는 응답 403
+- VentureBeat (429), Anthropic 뉴스 (404), ai-school tistory (406), ArsTechnica (robots 405: 정책 확인 불가라 제외)
+- Inside Higher Ed (피드에 정의되지 않은 XML 엔티티라 파서가 거부), eSchool News (XML 선언 앞 공백)
+- Google AI·Khan Academy·EdSurge : 응답은 되지만 프로필 키워드 통과 0건
 - 우아한형제들 기술블로그, SK DEVOCEAN, Reddit, arXiv : robots.txt 가 수집기 접근을 막음
 - 요즘IT (405), 컬리 (403), 쏘카 (404), 업스테이지 (404), 삼성SDS (XML 아님) : 피드 응답 없음
 - NC 리서치 : 2025-01 이후 새 글 없음
@@ -155,6 +166,34 @@ FEEDS: list[tuple[str, str]] = [
     ("toss", "https://toss.tech/rss.xml"),
     ("daangn", "https://medium.com/feed/daangn"),
     ("musinsa", "https://medium.com/feed/musinsa-tech"),
+    # 교육 전문 매체 (2026-11-08 추가): 교육소식 카테고리를 채우기 위한 예외. 블로그 한정 원칙에서 벗어난다.
+    ("edupress", "https://www.edupress.kr/rss/allArticle.xml"),
+    ("kyosu", "https://www.kyosu.net/rss/allArticle.xml"),
+    ("newsedu", "https://www.newsedu.kr/rss/allArticle.xml"),
+    # 한국어 AI·IT 매체
+    ("aitimes", "https://www.aitimes.com/rss/allArticle.xml"),
+    ("itworld_kr", "https://www.itworld.co.kr/rss/index.php"),
+    ("bloter", "https://www.bloter.net/rss/allArticle.xml"),
+    # 영어 소스 (lang=en 으로 저장, 요약 단계에서 한글 번역)
+    ("openai", "https://openai.com/news/rss.xml"),
+    ("deepmind", "https://deepmind.google/blog/rss.xml"),
+    ("huggingface", "https://huggingface.co/blog/feed.xml"),
+    ("github_ai", "https://github.blog/ai-and-ml/feed/"),
+    ("aws_ml", "https://aws.amazon.com/blogs/machine-learning/feed/"),
+    ("mistral", "https://mistral.ai/rss.xml"),
+    ("mit_tr", "https://www.technologyreview.com/topic/artificial-intelligence/feed"),
+    ("techcrunch_ai", "https://techcrunch.com/category/artificial-intelligence/feed/"),
+    ("verge_ai", "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml"),
+    ("wired_ai", "https://www.wired.com/feed/tag/ai/latest/rss"),
+    ("simonwillison", "https://simonwillison.net/atom/everything/"),
+    ("latent_space", "https://www.latent.space/feed"),
+    ("oneusefulthing", "https://www.oneusefulthing.org/feed"),
+    ("jackclark", "https://jack-clark.net/feed/"),
+    ("interconnects", "https://www.interconnects.ai/feed"),
+    ("producthunt_ai", "https://www.producthunt.com/feed?category=artificial-intelligence"),
+    ("thejournal", "https://www.thejournal.com/rss-feeds/all-articles.aspx"),
+    ("edtechmagazine", "https://www.edtechmagazine.com/k12/rss.xml"),
+    ("hn_ai", "https://hnrss.org/frontpage?q=AI+OR+LLM+OR+Claude"),
 ]
 
 # 등록 순서 = 실행 순서. 새 피드는 FEEDS 에 한 줄 추가.
