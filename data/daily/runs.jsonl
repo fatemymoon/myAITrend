@@ -14,3 +14,4 @@
 {"started_at": "2026-11-08T23:17:00+00:00", "finished_at": "2026-11-08T23:18:18+00:00", "fetched": 3259, "inserted": 9, "failed_sources": []}
 {"started_at": "2026-11-09T02:49:20+00:00", "finished_at": "2026-11-09T02:50:41+00:00", "fetched": 3260, "inserted": 14, "failed_sources": []}
 {"started_at": "2026-11-09T10:34:45+00:00", "finished_at": "2026-11-09T10:36:05+00:00", "fetched": 3255, "inserted": 41, "failed_sources": [{"source": "hn_ai", "error": "HTTPStatusError: Server error '502 Bad Gateway' for url 'https://hnrss.org/frontpage?q=AI+OR+LLM+OR+Claude'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/502"}]}
+{"started_at": "2026-11-09T21:11:47+00:00", "finished_at": "2026-11-09T21:13:06+00:00", "fetched": 3264, "inserted": 24, "failed_sources": []}
