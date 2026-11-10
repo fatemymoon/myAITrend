@@ -17,3 +17,4 @@
 {"started_at": "2026-11-09T21:11:47+00:00", "finished_at": "2026-11-09T21:13:06+00:00", "fetched": 3264, "inserted": 24, "failed_sources": []}
 {"started_at": "2026-11-10T03:40:13+00:00", "finished_at": "2026-11-10T03:41:31+00:00", "fetched": 3264, "inserted": 26, "failed_sources": [{"source": "hn_ai", "error": "HTTPStatusError: Server error '502 Bad Gateway' for url 'https://hnrss.org/frontpage?q=AI+OR+LLM+OR+Claude'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/502"}]}
 {"started_at": "2026-11-10T11:55:55+00:00", "finished_at": "2026-11-10T11:57:14+00:00", "fetched": 3270, "inserted": 54, "failed_sources": []}
+{"started_at": "2026-11-10T19:05:44+00:00", "finished_at": "2026-11-10T19:07:04+00:00", "fetched": 3221, "inserted": 20, "failed_sources": [{"source": "bloter", "error": "RobotsDisallowed: robots.txt 금지: https://www.bloter.net/rss/allArticle.xml"}]}
