@@ -19,3 +19,4 @@
 {"started_at": "2026-11-10T11:55:55+00:00", "finished_at": "2026-11-10T11:57:14+00:00", "fetched": 3270, "inserted": 54, "failed_sources": []}
 {"started_at": "2026-11-10T19:05:44+00:00", "finished_at": "2026-11-10T19:07:04+00:00", "fetched": 3221, "inserted": 20, "failed_sources": [{"source": "bloter", "error": "RobotsDisallowed: robots.txt 금지: https://www.bloter.net/rss/allArticle.xml"}]}
 {"started_at": "2026-11-11T00:07:39+00:00", "finished_at": "2026-11-11T00:09:00+00:00", "fetched": 3273, "inserted": 17, "failed_sources": []}
+{"started_at": "2026-11-11T06:51:26+00:00", "finished_at": "2026-11-11T06:52:45+00:00", "fetched": 3279, "inserted": 24, "failed_sources": []}
