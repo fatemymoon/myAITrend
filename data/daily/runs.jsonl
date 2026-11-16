@@ -40,3 +40,4 @@
 {"started_at": "2026-11-15T21:24:12+00:00", "finished_at": "2026-11-15T21:25:31+00:00", "fetched": 3286, "inserted": 4, "failed_sources": []}
 {"started_at": "2026-11-16T01:12:52+00:00", "finished_at": "2026-11-16T01:14:20+00:00", "fetched": 3288, "inserted": 14, "failed_sources": []}
 {"started_at": "2026-11-16T08:08:52+00:00", "finished_at": "2026-11-16T08:10:12+00:00", "fetched": 3286, "inserted": 30, "failed_sources": [{"source": "hn_ai", "error": "ValueError: hn_ai: 파싱된 항목이 0건"}]}
+{"started_at": "2026-11-16T18:43:52+00:00", "finished_at": "2026-11-16T18:45:24+00:00", "fetched": 3292, "inserted": 36, "failed_sources": [{"source": "hn_ai", "error": "RobotsDisallowed: robots.txt 금지: https://hnrss.org/frontpage?q=AI+OR+LLM+OR+Claude"}]}
